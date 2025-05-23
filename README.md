@@ -244,5 +244,192 @@ Este layout se renderizará para todas las subrutas de dashboards por lo que `mi
 
 # Navegación
 
-> {!WARNING}
+Por lo general, solemos hacer la navegación de nuestra página con el elemento `<a>` de HTML, no obstante esto tiene un gran problema, y es que, con él, en cada navegación se refresca toda la página, no sólo el contenido necesario, es ahí donde entra el componente `<Link>` de `next/link`, el cual nos permite navegar y que aquellos archivos que ya han sido descargados no se envíen nuevamente.
+
+```tsx
+// path: ./app/ui/dashboard/nav-links.tsx
+
+// ...
+import Link from 'next/link';
+
+const links = [
+  { name: 'Home', href: '/dashboard', icon: HomeIcon },
+  {
+    name: 'Invoices',
+    href: '/dashboard/invoices',
+    icon: DocumentDuplicateIcon,
+  },
+  { name: 'Customers', href: '/dashboard/customers', icon: UserGroupIcon },
+];
+ 
+export default function NavLinks() {
+  return (
+    <>
+      {links.map((link) => {
+        const LinkIcon = link.icon;
+        return (
+          <Link
+            key={link.name}
+            href={link.href}
+            className="flex h-[48px] grow items-center justify-center gap-2 rounded-md bg-gray-50 p-3 text-sm font-medium hover:bg-sky-100 hover:text-blue-600 md:flex-none md:justify-start md:p-2 md:px-3"
+          >
+            <LinkIcon className="w-6" />
+            <p className="hidden md:block">{link.name}</p>
+          </Link>
+        );
+      })}
+    </>
+  );
+}
+```
+
+Además de esto, en producción `<Link>` hace code spliting, lo que quiere decir que sólo se envia al cliente el código que se necesita, no todos los componentes. No obstante, Next hace un prefetch de la página a la que dirige un componente `<Link>` cuando este se encuentra en el viewport lo que también ayuda a que la navegación sea más fluida.
+
+## Estilos Según la Ruta
+
+Para cambiar los estilos de un componente según la ruta (página) en la que nos encontremos vamos a recurrir al Hook de Next llamado `usePathname`
+
+```tsx
+// path: ./app/ui/dashboard/nav-links.tsx
+
+// ...
+import { usePathname } from 'next/navigation';
+ 
+export default function NavLinks() {
+  const pathname = usePathname()
+
+  return (
+    <>
+      {links.map((link) => {
+        const LinkIcon = link.icon;
+        return (
+          <Link
+            key={link.name}
+            href={link.href}
+            className={`flex h-[48px] grow items-center justify-center gap-2 rounded-md bg-gray-50 p-3 text-sm font-medium hover:bg-sky-100 hover:text-blue-600 md:flex-none md:justify-start md:p-2 md:px-3
+            ${pathname === link.href ? 'bg-sky-100 text-blue-600' : ''}  
+            `}
+          >
+            <LinkIcon className="w-6" />
+            <p className="hidden md:block">{link.name}</p>
+          </Link>
+        );
+      })}
+    </>
+  );
+}
+```
+
+Pero con esto vamos a tener un problema, Next por defecto renderiza todos los componentes en el servidor, y el pathname es algo que sólo existe en el cliente, entonces tenemos que especificarle a Next que este componente tiene que renderizarse en el cliente y no en el servidor por medio de la directiva `'use client'`
+
+```tsx
+// path: ./app/ui/dashboard/nav-links.tsx
+'use client'
+
+// ...
+```
+
+# Base de Datos y Fetching de Datos
+
+A continuación veremos cómo hacer fetching de datos en NextJS y para qye sea más cercano a un entorno real crearemos una Base de Datos (BBDD de ahora en más) en los servidores de Vercel.
+
+## Crear la Base de Datos
+
+Para crear la BBDD vamo a utilizar Vercel Storage.
+
+Para ello primero debemos ir a la [página de Vercel](https://vercel.com/) y crearnos una cuenta, acto seguido vamos a Storage y crearemos una BBDD Postgres con `Neon` (debería ser la primera opción del apartado de Marketplace) del cual podemos leer en la sección de [integraciones](https://vercel.com/bautistas-projects-d352204f/~/integrations/neon).
+
+Ahora hacemos algunas configuraciones simples
+
+- Definimos la región: idealmente lo más cerca de nuestro proyecto posible.
+- Plan que vamos a usar: El plan gratuito nos permite conectar 10 proyectos y nos da 0.5 GB de almacenamiento, 190 horas de computo y autoescalado hasta 2 Unidades de Computo (2 vCPU, 8 GB RAM).
+- Nombre de la BBDD: para este ejemplo usaremos "customer-voices"
+
+Acto seguido nos dará varias opciones para conectarnos a la BBDD, en nuestro caso usaremos `.env.local`, le damos a "Copy Snippet" y lo pegamos en nuestro archivo `.env`, es MUY IMPORTANTE que esta información NO SE SUBA A NINGÚN LADO, ni a un repositorio remoto (a menos que sea privado) y mucho menos debe llegar al cliente.
+
+Hay un pequeño error con el código de Vercel a la hora de trabajar con Neon (no han actualizado la plantilla en un tiempo) por lo que debemos desintalar las dependencias de `bcrypt` y remplazarlas con `bcryptjs`
+
+```bash
+pnpm remove bcrypt @types/bcrypt
+
+pnpm add bcryptjs @types/bcryptjs
+```
+
+Y a continuación debemos modificar el archivo `./app/seed/route.ts` para que importe `bcryptjs` en lugar de `bcrypt`
+
+```ts
+// Antes:
+// import bcrypt from "bcrypt";
+
+// Después:
+import bcrypt from "bcryptjs";
+```
+
+A continuación nos aseguramos de estar ejecutando el proyecto en modo desarrollo con las dependencias actualizadas y vamos a nuestro navegador y nos dirigimos a `http://localhost:3000/seed`.
+
+Esto hará que en nuestra BBDD se carguen una serie de datos por defecto extraidos de los archivos en `./app/lib/`.
+
+## Fetching de Datos
+
+En Next, a diferencia de React tradicional, no vamos a usar hooks como `useEffect` o librerías como `ReactQuery` para realizar las peticiones, usar estos métodos implica que el fetching se haga en el cliente y por ende esto lleva a tener que enviar más código al cliente (el necesario para tratar los datos y renderizar) y mayores tiempos de carga ya que el usuario puede no tener una buena conexión a internet en el momento.
+
+Es aquí donde entran los React Server Components (RSCs), con los cuales ya hemos trabajado, son aquellos componentes que se renderizan únicamente en el servidor. Un peculiaridad de los RSCs es que pueden ser asincronos, esto nos permite usar sintaxis async/await de toda la vida dentro del componente
+
+```tsx
+// path ./app/dashboard/page.tsx
+import { fetchRevenue } from "../lib/data"
+
+export default async function DashboardPage () {
+  const revenue = await fetchRevenue()
+  console.log(revenue)
+
+  return <h2>Dashboard...</h2>
+}
+```
+
+Esto nos mostrará en terminal los datos que buscó en la BBDD.
+
+Acto seguido podemos cambiar nuestro `DashboardPage` para mostrar los datos obtenidos
+
+```tsx
+import { fetchRevenue } from "../lib/data"
+import RevenueChart from "../ui/dashboard/revenue-chart"
+import { lusitana } from "../ui/fonts"
+
+export default async function DashboardPage () {
+  const revenue = await fetchRevenue()
+  console.log(revenue)
+
+  return (
+    <main>
+      <h1 className={`${lusitana.className} mb-4 text-xl md:text-2xl`}>
+        Dashboard
+      </h1>
+      <div className="grid gap-6 sm:grid-cols-2 lg:grid-cols-4">
+        {/* <Card title="Collected" value={totalPaidInvoices} type="collected" />
+        <Card title="Pending" value={totalPendingInvoices} type="pending" />
+        <Card title="Total Invoices" value={numberOfInvoices} type="invoices" />
+        <Card
+          title="Total Customers"
+          value={numberOfCustomers}
+          type="customers"
+        /> */}
+      </div>
+      <div className="mt-6 grid grid-cols-1 gap-6 md:grid-cols-4 lg:grid-cols-8">
+        <RevenueChart revenue={revenue}  />
+
+        {/* <LatestInvoices latestInvoices={latestInvoices} /> */}
+      </div>
+    </main>
+  )
+}
+```
+
+Para que funcione el gráfico debemos ir al archivo en `./app/ui/dashboard/revenue-chart.tsx` y descomentar las lineas del componente.
+
+Ahora si mostramos los componentes `<LastestInvoices>` y `<Card>` (el proceso es igual a lo de antes) veremos que nuestro dashboard cobra más vida.
+
+## Suspense
+
+> [!WARNING]
 > IN PROGRESS...
