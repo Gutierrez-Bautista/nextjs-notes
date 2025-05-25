@@ -737,7 +737,93 @@ export default function Search({ placeholder }: { placeholder: string }) {
 
 ## Paginación
 
-A la hora de obtener información de una BBDD es muy común que necesitemos paginarla para, en primer lugar, no mostrar demasiada información; y en segundo lugar para no sobrecargar la BBDD ni el servidor por tener que procesar demasiados datos
+A la hora de obtener información de una BBDD es muy común que necesitemos paginarla para, en primer lugar, no mostrar demasiada información; y en segundo lugar para no sobrecargar la BBDD ni el servidor por tener que procesar demasiados datos.
+
+Lo primero que haremos, aporvechando que venimos trabajando con él, es editar el componente `./app/ui/search.tsx` para que al realizar una búsqueda nos lleve a la primera página
+
+```tsx
+// path ./app/ui/search.tsx
+// ...
+
+export default function Search({ placeholder }: { placeholder: string }) {
+  // ...
+
+const handleSearch = useDebouncedCallback((term: string) => {
+    const params = new URLSearchParams(searchParams)
+
+    if (term) {
+      params.set('query', term)
+    } else {
+      params.delete('query')
+    }
+    params.set('page', '1')
+
+    replace(`${pathname}?${params.toString()}`)
+  }, 500)
+
+  // ...
+}
+```
+
+Ahora nos dirigiremos al componente `./app/ui/invoices/pagination.tsx` y vamos a analizarlo un poco, en primer lugar veremos que salen varios errores, todos ellos porque no están definadas ciertas cosas, `currentPage` (type `number`), `createPageURL` (type `() => string`) y `allPages` (type `(number | string)[]`).
+
+Obtener la página actual es muy simple, la buscamos en los parametros de búsqueda
+
+```ts
+const searchParams = useSearchParams()
+const currentPage = Number(searchParams.get('page'))
+```
+
+En el caso de la función `createPageURL` es muy similar a lo que hicimos en `./app/ui/search.tsx` para actualizar la URL
+
+```tsx
+const createPageURL = (page: string | number) => {
+  const params = new URLSearchParams(searchParams)
+  params.set('page', String(page))
+
+  return `${pathname}?${params.toString()}`
+}
+```
+
+Por último, para obtener todas las páginas, que representa qué debe mostarse en cada item de la páginación (un número de página o puntos suspensivos), nos apoyaremos de una función encargada de generarla.
+
+```ts
+import { generatePagination } from '@/app/lib/utils';
+const allPages = generatePagination(currentPage, totalPages)
+```
+
+De esta manera el código de `./app/ui/invoices/pagination.tsx` quedaría de la siguiente manera
+
+```tsx
+'use client';
+
+// ...
+import { generatePagination } from '@/app/lib/utils';
+import { usePathname, useSearchParams } from 'next/navigation';
+
+export default function Pagination({ totalPages }: { totalPages: number }) {
+  const pathname = usePathname()
+  const searchParams = useSearchParams()
+  const currentPage = Number(searchParams.get('page'))
+
+  const allPages = generatePagination(currentPage, totalPages);
+
+  const createPageURL = (page: string | number) => {
+    const params = new URLSearchParams(searchParams)
+    params.set('page', String(page))
+
+    return `${pathname}?${params.toString()}`
+  }
+
+  // omito el return para simplificar el README
+  //...
+}
+
+// Omito otras funciones que ya vienen definidas
+// ...
+```
+
+# Server Actions
 
 > [!WARNING]
-> IN PROGRESS...
+> IN PROGRESS
