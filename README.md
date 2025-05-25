@@ -825,5 +825,171 @@ export default function Pagination({ totalPages }: { totalPages: number }) {
 
 # Server Actions
 
+Los Server Actions son una manera de ejecutar código asíncrono directamente en el servidor, lo que evita tener que crear una API para mutar datos en el servidor.
+
+Esto permite en muchos casos ahorrar lógica y validaciones en el cliente lo que ayuda a la simplicidad.
+
+```tsx
+export default function Page () {
+  // "create" es un action
+  const create = async (formData: FormData) => {
+    // indicamos que la función es de servidor, por lo que no se envían al cliente y se ejecutan en servidor
+    'use server'
+
+    // lógica para mutar datos
+    sql`INSERT INTO ...`
+    fetch('/api/users', {
+      method: 'POST',
+      body: formData
+    })
+  }
+
+  // El formulario va a llamar a la Server Action
+  return <form action={create}>...</form>
+}
+```
+
+En nuestro caso vamos a usar Server Actions para crear, modificar y eliminar facturas (invoices), empecemos creando nuestra página para crear facturas (`./app/dashboard/invoices/create`).
+
+```tsx
+// path: ./app/dashboard/invoices/create/page.tsx
+import Form from '@/app/ui/invoices/create-form';
+import Breadcrumbs from '@/app/ui/invoices/breadcrumbs';
+import { fetchCustomers } from '@/app/lib/data';
+
+export default async function Page() {
+  const customers = await fetchCustomers(); // <-- a la hora de crear una factura tenemos que asignarle un cliente
+
+  return (
+    <main>
+      <Breadcrumbs
+        breadcrumbs={[
+          { label: 'Invoices', href: '/dashboard/invoices' },
+          {
+            label: 'Create Invoice',
+            href: '/dashboard/invoices/create',
+            active: true,
+          },
+        ]}
+      />
+      <Form customers={customers} />
+    </main>
+  );
+}
+```
+
+A continuación nos dirigimos al formulario para crear facturas e importamos nuestra action desde `@/app/lib/actions`, crearemos ese archivo y nuestra server action en un momento, y se la asignamos al formulario.
+
+```tsx
+// path: ./app/ui/invoices/create-form.tsx
+// ...
+import { createInvoice } from '@/app/lib/actions';
+
+export default function Form({ customers }: { customers: CustomerField[] }) {
+  return (
+    <form action={createInvoice}>
+      {/* ... */}
+    </form>
+  );
+}
+```
+
+Ahora sí, vamos allá con nuestra Server Action `createInvoice`
+
+```tsx
+// path: ./app/lib/actions.ts
+'use server' // <-- Las funciones de este archivo se ejecutan en el servidor
+
+import { z } from 'zod' // usamos zod para validar datos
+
+// Esquema de un invoice en la BBDD
+const CreateInvoiceSchema = z.object({
+  id: z.string(),
+  customerId: z.string(),
+  amount: z.coerce.number(), // Se almacena en centavos
+  status: z.enum(['pending', 'paid']),
+  date: z.string()
+})
+
+// Esquema de la información que recibimos
+const CreateInvoiceFormSchema = CreateInvoiceSchema.omit({
+  id: true,
+  date: true
+})
+
+export async function createInvoice(formData: FormData) {
+  // Obtenemos los datos del formulario
+  const { customerId, amount, status } = CreateInvoiceFormSchema.parse({
+    customerId: formData.get('customerId'),
+    amount: formData.get('amount'),
+    status: formData.get('status')
+  })
+}
+```
+
+A continuación debemos crear la fecha de la factura nosotros en base a la actual en el formato `YYYY-MM-DD`, pasar el monto a centavos y guardar la información en la BBDD
+
+```tsx
+// path: ./app/lib/actions.ts
+// ...
+import postgres from 'postgres'
+
+const sql = postgres(process.env.POSTGRES_URL!, { ssl: 'require' })
+// ...
+
+export async function createInvoice(formData: FormData) {
+  // Obtenemos los datos del formulario
+  const { customerId, amount, status } = CreateInvoiceFormSchema.parse({
+    customerId: formData.get('customerId'),
+    amount: formData.get('amount'),
+    status: formData.get('status')
+  })
+
+  const amountInCents = amount * 100
+
+  const [date] = new Date().toISOString().split('T')
+
+  await sql`
+    INSERT INTO invoices (customer_id, amount, status, date)
+    VALUES (${customerId}, ${amountInCents}, ${status}, ${date})
+  `
+}
+```
+
+Por último lo que haremos es redirigir al usuario a la página `/dashboard/invoices` para que pueda ver la factura cargada, no obstante, no basta con simplemente redirigirlo ya que Next por defecto deja en cache la información de la última vez que el usuario estuvo allí, por lo que tenemos que decirle que `revalidar la ruta`.
+
+```tsx
+// path: ./app/lib/actions.ts
+// ...
+import { revalidatePath } from 'next/cache' // función para revalidar un ruta (eliminar el cache y solicitarla de nuevo)
+import { redirect } from 'next/navigation' // función para redirigir al usuario
+
+// ...
+
+export async function createInvoice(formData: FormData) {
+  const { customerId, amount, status } = CreateInvoiceFormSchema.parse({
+    customerId: formData.get('customerId'),
+    amount: formData.get('amount'),
+    status: formData.get('status')
+  })
+
+  const amountInCents = amount * 100
+
+  const [date] = new Date().toISOString().split('T')
+
+  await sql`
+    INSERT INTO invoices (customer_id, amount, status, date)
+    VALUES (${customerId}, ${amountInCents}, ${status}, ${date})
+  `
+
+  revalidatePath('/dashboard/invoices') // <-- revalidamos la ruta
+  redirect('/dashboard/invoices') // <-- redireccionamos al usuario
+}
+```
+
+Con esto ya funciona nuestra creación de facturas.
+
+# Rutas Dinámicas
+
 > [!WARNING]
 > IN PROGRESS
