@@ -429,7 +429,315 @@ Para que funcione el gráfico debemos ir al archivo en `./app/ui/dashboard/reven
 
 Ahora si mostramos los componentes `<LastestInvoices>` y `<Card>` (el proceso es igual a lo de antes) veremos que nuestro dashboard cobra más vida.
 
-## Suspense
+## Loading y Suspense
+
+Ahora bien, supongamos que nuestras peticiones tardan 3 segundos (lo cual es bastante), de la manera que hicimos el fetching lo que esto proboca es que toda la página tarde esos tres segundos en cargar, esto es claramente negativo para la experiencia del usuario y es por ello que nos vamos a apoyar de una de dos estrategias, un componente `loading.tsx` o usar el componente `<Suspense>` de React.
+
+### `loading.tsx`
+
+De la misma forma que un componente `page.tsx` es el que se renderiza como contenido de una página, si tenemos un componente `loading.tsx` en una ruta será ese componente `loading.tsx` el que se renderice mientras el componente `page.tsx` carga.
+
+Para simular que la petición para obtener los revenue tarda 3 segundo vamos a editar la función `fetchRevenue` de `./app/lib/data.ts` para descomentar la promesa de la linea 20
+
+```ts
+// path ./app/lib/data.ts
+
+// ...
+
+export async function fetchRevenue() {
+  try {
+    // ...
+    await new Promise((resolve) => setTimeout(resolve, 3000));
+
+    // ...
+  } catch (error) {
+    // ...
+  }
+}
+```
+
+Ahora nosdirigimos a `./app/dashboard` y creamos un archivo `loading.tsx` que contenga un componente que renderice `<DashboardSkeleton />` (componente de la demo de Next)
+
+```tsx
+// ./app/dashboard/loading.tsx
+import DashboardSkeleton from "../ui/skeletons";
+
+export default function DashboardLoading () {
+  return <DashboardSkeleton />
+}
+```
+
+De esta manera si navegamos a `localhost:3000/dashboard` Next nos mostrará una previsualización de cómo se verá la página cuando termine de cargar.
+
+### Suspense
+
+No obstante, lo que vimos antes es poco práctico en este caso, ya que estamos retrasando el renderizado de toda la página porque una petición que afecta a un solo componente tarda, es ahí cuando conviene hacer la petición en cuestión dentro del componente y envolverlo en en el componente `<Suspense>` de React
+
+```tsx
+// path ./app/ui/dashboard/revenue-chart.tsx
+// ...
+import { fetchRevenue } from '@/app/lib/data';
+
+// ...
+
+export default async function RevenueChart() {
+  const revenue = await fetchRevenue()
+  // ...
+}
+```
+
+A continuación lo que haremos en nuestra página del dashboard es envolver el componente en un `<Suspense>` y darle un fallback (lo que se renderizará mientra el componente suspendido carga)
+
+```tsx
+// path ./app/dashboard/page.tsx
+// ...
+
+export default async function DashboardPage () {
+  // ...
+
+  return (
+    <main>
+      {/* ... */}
+      <div className="mt-6 grid grid-cols-1 gap-6 md:grid-cols-4 lg:grid-cols-8">
+        <Suspense fallback={<RevenueChartSkeleton />}>
+          <RevenueChart />
+        </Suspense>
+        <LatestInvoices latestInvoices={latestInvoices} />
+      </div>
+    </main>
+  )
+}
+```
+
+Esto que acabamos de hacer se denomina "HTML Straming", dejamos la conexión abierta para poder enviar el contenido cuando termine de renderizarse.
+
+# Busqueda, Paginación y estado en URL
+
+Al hacer una página web muchas veces vamos a querer paginar el contenido para no pedir demasiados datos al servidor y que el usuario pueda realizar busquedas, para ello es muy común usar los query params de la URL, y Next nos otorga una serie de Hooks muy útiles.
+
+Pero antes de ver los hooks que usaremos vamos a capturar el input del usuario. Esto lo hacemos de la misma manera en que se hace tradicionalmente con React
+
+```tsx
+// path ./app/ui/search.tsx
+import { MagnifyingGlassIcon } from '@heroicons/react/24/outline';
+
+export default function Search({ placeholder }: { placeholder: string }) {
+  const handleSearch = (term: string) => {
+    console.log(term) // <--- input del usuario
+  }
+
+  return (
+    <div className="relative flex flex-1 flex-shrink-0">
+      <label htmlFor="search" className="sr-only">
+        Search
+      </label>
+      <input
+        onChange={(e) => { handleSearch(e.target.value) } }
+        className="peer block w-full rounded-md border border-gray-200 py-[9px] pl-10 text-sm outline-2 placeholder:text-gray-500"
+        placeholder={placeholder}
+      />
+      <MagnifyingGlassIcon className="absolute left-3 top-1/2 h-[18px] w-[18px] -translate-y-1/2 text-gray-500 peer-focus:text-gray-900" />
+    </div>
+  );
+}
+```
+
+## Busqueda
+
+Ahora sí, nosotro lo que queremos es acceder a los query params de la URL, lo normal sería hacerlo por medio del objeto `window`, no obstante, Next nos otorga un hook que nos permite acceder a ellos más facilmente `useSearchParams` de `next/navigation`. Vamos a usar este hook para 2 cosas, en primer lugar obtener los query params que ya están en la URL para que el valor por defecto del input refleje el parametro `query` y en segundo lugar para que a la hora de actualizarlos persistan los anteriores
+
+```tsx
+// path ./app/ui/search.tsx
+// ...
+import { useSearchParams } from 'next/navigation';
+
+export default function Search({ placeholder }: { placeholder: string }) {
+  const searchParams = useSearchParams() // <-- obtenemos los query params
+
+  const handleSearch = (term: string) => {
+    const params = new URLSearchParams(searchParams) // <-- creamos los nuevos parametros
+
+    if (term) {
+      params.set('query', term) // <-- si el input no está vacío cambiamos el valor del parametro `query`
+    } else {
+      params.delete('query') // <-- si el input está vacío eliminamos el parametro `query`
+    }
+  }
+
+  return (
+    <div className="relative flex flex-1 flex-shrink-0">
+      <label htmlFor="search" className="sr-only">
+        Search
+      </label>
+      <input
+        onChange={(e) => { handleSearch(e.target.value) }}
+        className="peer block w-full rounded-md border border-gray-200 py-[9px] pl-10 text-sm outline-2 placeholder:text-gray-500"
+        placeholder={placeholder}
+        defaultValue={searchParams.get('query')?.toString()}
+      />
+      <MagnifyingGlassIcon className="absolute left-3 top-1/2 h-[18px] w-[18px] -translate-y-1/2 text-gray-500 peer-focus:text-gray-900" />
+    </div>
+  );
+}
+
+```
+
+Para sincronizar la URL con el input lo que vamos a hacer es apoyarnos de otros dos hooks de `next/navigation`, `usePathname` e `useRouter`. El primero nos permite acceder a la ruta actual mientras que el segundo nos da una serie de funciones que ayudan a navegar, en nuestro caso usaremos unicamente `replace`
+
+```tsx
+// path ./app/ui/search.tsx
+'use client';
+
+import { MagnifyingGlassIcon } from '@heroicons/react/24/outline';
+import { useSearchParams, usePathname, useRouter } from 'next/navigation';
+
+export default function Search({ placeholder }: { placeholder: string }) {
+  const searchParams = useSearchParams()
+  const pathname = usePathname() // pathname = ruta actual
+  const { replace } = useRouter()
+
+  const handleSearch = (term: string) => {
+    const params = new URLSearchParams(searchParams)
+
+    if (term) {
+      params.set('query', term)
+    } else {
+      params.delete('query')
+    }
+
+    replace(`${pathname}?${params.toString()}`) // remplazamos la URL del navegador
+  }
+
+  return (
+    <div className="relative flex flex-1 flex-shrink-0">
+      <label htmlFor="search" className="sr-only">
+        Search
+      </label>
+      <input
+        onChange={(e) => { handleSearch(e.target.value) }}
+        className="peer block w-full rounded-md border border-gray-200 py-[9px] pl-10 text-sm outline-2 placeholder:text-gray-500"
+        placeholder={placeholder}
+        defaultValue={searchParams.get('query')?.toString()}
+      />
+      <MagnifyingGlassIcon className="absolute left-3 top-1/2 h-[18px] w-[18px] -translate-y-1/2 text-gray-500 peer-focus:text-gray-900" />
+    </div>
+  );
+}
+```
+
+Ahora nos toca recuperar los query params desde el servidor, para ello primero recordemos cómo es nuestra página de Invoices
+
+```tsx
+// path ./app/dashboard/invoices/page.tsx
+import Search from '@/app/ui/search';
+import { CreateInvoice } from '@/app/ui/invoices/buttons';
+import { lusitana } from '@/app/ui/fonts';
+
+import Pagination from '@/app/ui/invoices/pagination';
+import Table from '@/app/ui/invoices/table';
+import { InvoicesTableSkeleton } from '@/app/ui/skeletons';
+import { Suspense } from 'react';
+
+export default async function Page() {
+  return (
+    <div className="w-full">
+      <div className="flex w-full items-center justify-between">
+        <h1 className={`${lusitana.className} text-2xl`}>Invoices</h1>
+      </div>
+      <div className="mt-4 flex items-center justify-between gap-2 md:mt-8">
+        Search placeholder="Search invoices..." />
+        <CreateInvoice />
+      </div>
+        {/* <Suspense key={query + currentPage} fallback={<InvoicesTableSkeleton />}>
+        <Table query={query} currentPage={currentPage} /> */}
+      </Suspense>
+      <div className="mt-5 flex w-full justify-center">
+        {/* <Pagination totalPages={totalPages} /> */}
+      </div>
+    </div>
+  );
+}
+```
+
+Para nuestra fortuna Next nos inyecta en las Props de nuestras paginas una prop del tipo
+
+```ts
+searchParams: Promise<{
+  // Cada query param
+}>
+```
+
+Gracias a esto para usar los query params es tan simple como hacer lo siguiente
+
+```tsx
+// path ./app/dashboard/invoices/page.tsx
+// ...
+
+export default async function Page(props: {
+  searchParams?: Promise<{
+    query?: string
+    page?: `${number}`
+  }>
+}) {
+  const searchParams = await props.searchParams
+  const query = searchParams?.query || ''
+  const currentPage = Number(searchParams?.page) || 1 // Veremos paginación en un momento
+  console.log(query, currentPage)
+
+  return (
+    <div className="w-full">
+      <div className="flex w-full items-center justify-between">
+        <h1 className={`${lusitana.className} text-2xl`}>Invoices</h1>
+      </div>
+      <div className="mt-4 flex items-center justify-between gap-2 md:mt-8">
+        <Search placeholder="Search invoices..." />
+        <CreateInvoice />
+      </div>
+        <Suspense key={query + currentPage} fallback={<InvoicesTableSkeleton />}>
+        <Table query={query} currentPage={currentPage} />
+      </Suspense>
+      <div className="mt-5 flex w-full justify-center">
+        {/* <Pagination totalPages={totalPages} /> */}
+      </div>
+    </div>
+  );
+}
+```
+
+### Agregando Debounce
+
+Para agregar un debounce a la busqueda nos apoyaremos de la dependencia `use-debounce`
+
+```tsx
+// path ./app/ui/search.tsx
+// ...
+import { useDebouncedCallback } from 'use-debounce'
+
+export default function Search({ placeholder }: { placeholder: string }) {
+  const searchParams = useSearchParams()
+  const pathname = usePathname()
+  const { replace } = useRouter()
+
+  const handleSearch = useDebouncedCallback((term: string) => {
+    const params = new URLSearchParams(searchParams)
+
+    if (term) {
+      params.set('query', term)
+    } else {
+      params.delete('query')
+    }
+
+    replace(`${pathname}?${params.toString()}`)
+  }, 500)
+
+  // ...
+}
+
+```
+
+## Paginación
+
+A la hora de obtener información de una BBDD es muy común que necesitemos paginarla para, en primer lugar, no mostrar demasiada información; y en segundo lugar para no sobrecargar la BBDD ni el servidor por tener que procesar demasiados datos
 
 > [!WARNING]
 > IN PROGRESS...
