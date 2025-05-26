@@ -1083,5 +1083,96 @@ El resto de la actualización puede hacerse siguiendo la guía de Vercel, mi obj
 
 # Manejando Errores
 
+En nuestros Server Actions que creamos para crear, modificar y eliminar facturas hay varios errores que no estamos manejando, veamoslo con la de creación
+
+```ts
+export async function createInvoice(formData: FormData) {
+  // `.parse` de Zod lanza un Error si los datos no cumplen el esquema
+  const { customerId, amount, status } = CreateInvoiceFormSchema.parse({
+    customerId: formData.get('customerId'),
+    amount: formData.get('amount'),
+    status: formData.get('status')
+  })
+
+  const amountInCents = amount * 100
+
+  const [date] = new Date().toISOString().split('T')
+
+  // Si por algún motivo el INSERT falla se lanza un Error
+  await sql`
+    INSERT INTO invoices (customer_id, amount, status, date)
+    VALUES (${customerId}, ${amountInCents}, ${status}, ${date})
+  `
+
+  revalidatePath('/dashboard/invoices')
+  redirect('/dashboard/invoices')
+}
+```
+
+Manejar estos errores es bastante fácil, usamos `try/catch` y el método `safeParse` del esquema.
+
+```ts
+export async function createInvoice(formData: FormData) {
+  const safeData = CreateInvoiceFormSchema.safeParse({
+    customerId: formData.get('customerId'),
+    amount: formData.get('amount'),
+    status: formData.get('status')
+  })
+
+  if (safeData.error) {
+    return { error: 'Alguno de los datos no fue ingresado' }
+  }
+
+  const { customerId, amount, status } = safeData.data
+
+  const amountInCents = amount * 100
+
+  const [date] = new Date().toISOString().split('T')
+
+  try {
+    await sql`
+      INSERT INTO invoices (customer_id, amount, status, date)
+      VALUES (${customerId}, ${amountInCents}, ${status}, ${date})
+    `
+  } catch (error) {
+    return { error: 'No se pudo cargar la factura, intentelo más tarde' }
+  }
+
+  revalidatePath('/dashboard/invoices')
+  redirect('/dashboard/invoices')
+}
+```
+
+Notese que en caso de que haya un error devolvemos un objeto con una clave `error`, este objeto podemos recuperarlo desde el cliente apoyandonos del hook `useActionState` de React
+
+```tsx
+// path: ./app/ui/invoices/create-form.tsx
+// ...
+
+import { useActionState } from 'react';
+import { createInvoice } from '@/app/lib/actions';
+
+export default function Form({ customers }: { customers: CustomerField[] }) {
+  const [state, formAction, isPending] = useActionState(createInvoice, { error: '' })
+
+  return (
+    <form action={formAction}>
+      {/* ... */}
+      {/* podemos renderizar algo si tenemos un error */}
+    </form>
+  );
+}
+```
+
+Pero para poder hacer esto tenemos que modificar nuestra Action para que acepte el estado anterior
+
+```ts
+export async function createInvoice(prevState: any, formData: FormData) {
+  // ...
+}
+```
+
+## `error.tsx`
+
 > [!WARNING]
 > IN PROGRESS...
