@@ -903,7 +903,7 @@ Ahora sí, vamos allá con nuestra Server Action `createInvoice`
 import { z } from 'zod' // usamos zod para validar datos
 
 // Esquema de un invoice en la BBDD
-const CreateInvoiceSchema = z.object({
+const InvoiceSchema = z.object({
   id: z.string(),
   customerId: z.string(),
   amount: z.coerce.number(), // Se almacena en centavos
@@ -912,7 +912,7 @@ const CreateInvoiceSchema = z.object({
 })
 
 // Esquema de la información que recibimos
-const CreateInvoiceFormSchema = CreateInvoiceSchema.omit({
+const CreateInvoiceFormSchema = InvoiceSchema.omit({
   id: true,
   date: true
 })
@@ -989,7 +989,99 @@ export async function createInvoice(formData: FormData) {
 
 Con esto ya funciona nuestra creación de facturas.
 
+## Valores Sensibles en Server Actions
+
+Ahora pasemos a eliminar una factura, para ello necesitamos pasar la ID de factura a la Server Action, y como podrás deducir no hemos visto cómo pasar datos adicionales a los del formulario a la Server Action.
+
+Supongo que es evidente que intentar hacerlo de la siguiente manera no funcionrá
+
+```tsx
+<form action={updateInvoice(id)}>
+```
+
+Para pasar un valor distinto al formulario, sobre todo cuando trabajamos con información sensible podemos ayudarnos de la función `bind` de JS
+
+```tsx
+// path: ./app/ui/invoices/buttons.tsx
+import { deleteInvoice } from '@/app/lib/actions'; // Esta action hace la llamada a la BBDD con una sentencia `DELETE`
+
+// ...
+
+export function DeleteInvoice({ id }: { id: string }) {
+  const deleteInvoiceWithId = deleteInvoice.bind(null, id); // agregamos la ID
+
+  return (
+    // el componente original no tiene el formulario, debemos agregarlo
+    <form action={deleteInvoiceWithId}>
+      <button type="submit" className="rounded-md border p-2 hover:bg-gray-100">
+        <span className="sr-only">Delete</span>
+        <TrashIcon className="w-4" />
+      </button>
+    </form>
+  );
+}
+```
+
+Esta aproximación es útil a la hora de enviar datos sensibles como IDs a las que el usuario no debería tener acceso ya que estas IDs se almacenarán en memoria, lo cual hace que sean más difíciles de acceder.
+
+Una lectura adicional interesante sobre Server Actions es la realacionada a [Seguridad en Server Actions](https://nextjs.org/blog/security-nextjs-server-components-actions) (lectura en inglés como todas las entradas del blog de Vercel).
+
 # Rutas Dinámicas
 
+Al igual que muchos otros frameworks para especificar que una parte de una ruta de Next debe ser dinámica lo que hacemos es poner el nombre de la carpeta entre corchetes (Ej: `[id]/`).
+
+Vamos a usar esto para poder crear la página para editar facturas.
+
+Antes de ir con esta página veamos que en la tabla de facturas tenemos un botón para editarlas que recibe el ID de la factura.
+
+```tsx
+// path: ./app/ui/invoices/table.tsx
+export default async function InvoicesTable({
+  query,
+  currentPage,
+}: {
+  query: string;
+  currentPage: number;
+}) {
+  return (
+    // ...
+    <td className="flex justify-end gap-2 whitespace-nowrap px-6 py-4 text-sm">
+      <UpdateInvoice id={invoice.id} />
+      <DeleteInvoice id={invoice.id} />
+    </td>
+    // ...
+  );
+}
+```
+
+Nos dirigimos al componente del botón para modificar la factura y editamos el componente `<Link>` para que redirija hacia la página de modificación correspondiente
+
+```tsx
+// path: ./app/ui/invoices/buttons.tsx
+import { PencilIcon, PlusIcon, TrashIcon } from '@heroicons/react/24/outline';
+import Link from 'next/link';
+
+// ...
+
+
+export function UpdateInvoice({ id }: { id: string }) {
+  return (
+    // Usamos la id para dirigir a la página de modificación
+    <Link
+      href={`/dashboard/invoices/${id}/edit`}
+      className="rounded-md border p-2 hover:bg-gray-100"
+    >
+      <PencilIcon className="w-5" />
+    </Link>
+  );
+}
+
+// ...
+```
+
+El resto de la actualización puede hacerse siguiendo la guía de Vercel, mi objetivo no es hacer una copia de esta sino centrarme en la información en sí.
+
+# Manejando Errores
+
 > [!WARNING]
-> IN PROGRESS
+> IN PROGRESS...
