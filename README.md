@@ -1270,7 +1270,7 @@ export default async function Page(props: { params: Promise<{ id: string }> }) {
 
 Con esto en caso de que no encontremos la factura en cuestión Next renderizará el componente en `not-found.tsx` como página
 
-# Mejorando la Accesibilidad
+# Autentificación
 
 > [!WARNING]
 > IN PROGRESS...

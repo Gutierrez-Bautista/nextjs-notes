@@ -9,19 +9,13 @@ const sql = postgres(process.env.POSTGRES_URL!, { ssl: 'require' })
 
 const InvoiceSchema = z.object({
   id: z.string(),
-  customerId: z.string(),
-  amount: z.preprocess((v) => {
-    if (typeof v !== 'string') {
-      return v;
-    }
-
-    if (v === '') {
-      return undefined;
-    }
-
-    return Number(v.trim().replace(/,/, '.'))
-  }, z.number()),
-  status: z.enum(['pending', 'paid']),
+  customerId: z.string({
+    invalid_type_error: 'Seleccione un cliente'
+  }),
+  amount: z.coerce.number({ invalid_type_error: 'Ingrese un número' }).gt(0, { message: 'Ingrese un monto mayor a 0' }),
+  status: z.enum(['pending', 'paid'], {
+    invalid_type_error: 'Seleccione un estado para la factura'
+  }),
   date: z.string()
 })
 
@@ -30,7 +24,16 @@ const CreateInvoiceFormSchema = InvoiceSchema.omit({
   date: true
 })
 
-export async function createInvoice(formData: FormData) {
+export type State = {
+  errors?: {
+    customerId?: string[];
+    amount?: string[];
+    status?: string[];
+  };
+  message?: string | null;
+};
+
+export async function createInvoice(prevState: State, formData: FormData) {
   const safeData = CreateInvoiceFormSchema.safeParse({
     customerId: formData.get('customerId'),
     amount: formData.get('amount'),
@@ -38,7 +41,10 @@ export async function createInvoice(formData: FormData) {
   })
 
   if (safeData.error) {
-    throw new Error("Alguno de los datos no fué ingresado")
+    return {
+      errors: safeData.error.flatten().fieldErrors,
+      message: 'Capos faltantes, no se puede crear la factura',
+    }
   }
 
   const { customerId, amount, status } = safeData.data
@@ -52,17 +58,17 @@ export async function createInvoice(formData: FormData) {
       INSERT INTO invoices (customer_id, amount, status, date)
       VALUES (${customerId}, ${amountInCents}, ${status}, ${date})
     `
-  } catch (error) {
-    throw new Error("No se pudo cargar la factura, intentelo más tarde")
+  } catch {
+    return {
+      message: 'Fallo al cargar en la Base de Datos, intentelo más tarde'
+    }
   }
 
   revalidatePath('/dashboard/invoices')
   redirect('/dashboard/invoices')
 }
 
-const UpdateInvoice = InvoiceSchema.omit({ id: true, date: true });
-
-export async function updateInvoice(id: string, formData: FormData) {
+export async function updateInvoice(id: string, prevState: State, formData: FormData) {
   const safeData = CreateInvoiceFormSchema.safeParse({
     customerId: formData.get('customerId'),
     amount: formData.get('amount'),
@@ -70,7 +76,10 @@ export async function updateInvoice(id: string, formData: FormData) {
   })
 
   if (safeData.error) {
-    throw new Error("Alguno de los datos no fue ingresado")
+    return {
+      errors: safeData.error.flatten().fieldErrors,
+      message: 'Campos faltantes'
+    }
   }
 
   const { customerId, amount, status } = safeData.data
@@ -83,8 +92,10 @@ export async function updateInvoice(id: string, formData: FormData) {
       SET customer_id = ${customerId}, amount = ${amountInCents}, status = ${status}
       WHERE id = ${id}
     `;
-  } catch (error) {
-    throw new Error("La actualización falló, intentelo más tarde")
+  } catch {
+    return {
+      message: 'Error al actualizar la factura, intentelo más tarde',
+    }
   }
 
   revalidatePath('/dashboard/invoices');
