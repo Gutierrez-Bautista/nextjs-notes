@@ -1147,8 +1147,10 @@ Notese que en caso de que haya un error devolvemos un objeto con una clave `erro
 
 ```tsx
 // path: ./app/ui/invoices/create-form.tsx
+'use client'
 // ...
 
+// useActionState es un hook del cliente
 import { useActionState } from 'react';
 import { createInvoice } from '@/app/lib/actions';
 
@@ -1173,6 +1175,102 @@ export async function createInvoice(prevState: any, formData: FormData) {
 ```
 
 ## `error.tsx`
+
+Por último, si se lanza una excepción que no hayamos manejado nuestra aplicación fallará, para controlar estos casos podemos crear un archivo `error.tsx` con un componente que se como página en caso de que ocurra una excepción no manejada.
+
+```tsx
+// path: ./app/dashboard
+'use client';
+
+import { useEffect } from 'react';
+
+export default function Error({
+  error,
+  reset,
+}: {
+  error: Error & { digest?: string };
+  reset: () => void;
+}) {
+  useEffect(() => {
+    console.error(error);
+  }, [error]);
+
+  return (
+    <main className="flex h-full flex-col items-center justify-center">
+      <h2 className="text-center">Ocurrió un error</h2>
+      <button
+        className="mt-4 rounded-md bg-blue-500 px-4 py-2 text-sm text-white transition-colors hover:bg-blue-400"
+        onClick={
+          // Attempt to recover by trying to re-render the invoices route
+          () => reset()
+        }
+      >
+        Try again
+      </button>
+    </main>
+  );
+}
+```
+
+Este componente en `error.tsx` acepta dos props
+
+- `error`: un objeto `Error` de JavaScript
+- `reset`: una función que intenta re-renderizar la ruta
+
+## 404 Not Found
+
+Ahora supongamos que intentamos modificarl manualmente la URL para acceder a la edición de una factura que no existe (Ej: [http://localhost:3000/dashboard/invoices/2e94d1ed-d220-449f-9f11-f0bbceed9645/edit](http://localhost:3000/dashboard/invoices/2e94d1ed-d220-449f-9f11-f0bbceed9645/edit)), si queremos mostrar una página en especial para estos casos debemos hacer lo siguiente.
+
+En primer lugar crear un archivo `not-found.tsx` que renderice la página en cuestión
+
+```tsx
+// path: ./app/dashboard/invoices/[id]/edit/not-found.tsx
+import Link from 'next/link';
+import { FaceFrownIcon } from '@heroicons/react/24/outline';
+
+export default function NotFound() {
+  return (
+    <main className="flex h-full flex-col items-center justify-center gap-2">
+      <FaceFrownIcon className="w-10 text-gray-400" />
+      <h2 className="text-xl font-semibold">404 Not Found</h2>
+      <p>No se encontró la factura.</p>
+      <Link
+        href="/dashboard/invoices"
+        className="mt-4 rounded-md bg-blue-500 px-4 py-2 text-sm text-white transition-colors hover:bg-blue-400"
+      >
+        Volver
+      </Link>
+    </main>
+  );
+}
+```
+
+Ahora debemos usar la función `notFound` de `next/navigation` para redirigir a esa página en caso de que no se encuetre la factura
+
+```tsx
+// path: ./app/dashboard/invoices/[id]/edit/page.tsx
+// ...
+import { notFound } from 'next/navigation';
+
+export default async function Page(props: { params: Promise<{ id: string }> }) {
+  const params = await props.params
+  const id = params.id
+  const [invoice, customers] = await Promise.all([
+    fetchInvoiceById(id),
+    fetchCustomers(),
+  ]);
+
+  if (!invoice) {
+    notFound()
+  }
+
+  // ...
+}
+```
+
+Con esto en caso de que no encontremos la factura en cuestión Next renderizará el componente en `not-found.tsx` como página
+
+# Mejorando la Accesibilidad
 
 > [!WARNING]
 > IN PROGRESS...
